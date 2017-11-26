@@ -6,55 +6,54 @@ import daemon
 import signal
 import threading
 import twitter
-import json 
+import json
 import random
 from logger import Logger
 
 shutdownFlag = False
 
-def main(filename, argv):
-    print "======================================"
-    print " Starting Speed Complainer!           "
-    print " Lets get noisy!                      "
-    print "======================================"
 
+def main(filename, argv):
     global shutdownFlag
     signal.signal(signal.SIGINT, shutdownHandler)
-
     monitor = Monitor()
 
     while not shutdownFlag:
         try:
-
             monitor.run()
-
             for i in range(0, 5):
                 if shutdownFlag:
                     break
                 time.sleep(1)
-
         except Exception as e:
-            print 'Error: %s' % e
+            print('Error: %s' % e)
             sys.exit(1)
-
     sys.exit()
 
-def shutdownHandler(signo, stack_frame):
+
+def shutdownHandler(signal, stack_frame):
     global shutdownFlag
-    print 'Got shutdown signal (%s: %s).' % (signo, stack_frame)
+    print('Got shutdown signal (%s: %s).' % (signal, stack_frame))
     shutdownFlag = True
+
 
 class Monitor():
     def __init__(self):
         self.lastPingCheck = None
         self.lastSpeedTest = None
+        self.config = json.load(open('./config.json'))
+        self.logger = Logger(self.config['log']['type'], {'filename': self.config['log']['files']['speed']})
 
     def run(self):
+        """
         if not self.lastPingCheck or (datetime.now() - self.lastPingCheck).total_seconds() >= 60:
             self.runPingTest()
             self.lastPingCheck = datetime.now()
+        """
+        if not self.lastSpeedTest or (datetime.now() - self.lastSpeedTest).total_seconds() >= 1800:
+            if self.lastSpeedTest is not None and self.lastSpeedTest.date() != datetime.now().date():
+                self.logDate()
 
-        if not self.lastSpeedTest or (datetime.now() - self.lastSpeedTest).total_seconds() >= 3600:
             self.runSpeedTest()
             self.lastSpeedTest = datetime.now()
 
@@ -66,6 +65,9 @@ class Monitor():
         speedThread = SpeedTest()
         speedThread.start()
 
+    def logDate(self):
+        self.logger.log(datetime.now().strftime('%B %d, %Y'),)
+
 class PingTest(threading.Thread):
     def __init__(self, numPings=3, pingTimeout=2, maxWaitTime=6):
         super(PingTest, self).__init__()
@@ -73,44 +75,46 @@ class PingTest(threading.Thread):
         self.pingTimeout = pingTimeout
         self.maxWaitTime = maxWaitTime
         self.config = json.load(open('./config.json'))
-        self.logger = Logger(self.config['log']['type'], { 'filename': self.config['log']['files']['ping'] })
+        self.logger = Logger(self.config['log']['type'], {'filename': self.config['log']['files']['ping']})
 
     def run(self):
         pingResults = self.doPingTest()
         self.logPingResults(pingResults)
 
     def doPingTest(self):
-        response = os.system("ping -c %s -W %s -w %s 8.8.8.8 > /dev/null 2>&1" % (self.numPings, (self.pingTimeout * 1000), self.maxWaitTime))
+        response = os.system("ping -c %s -W %s -w %s 8.8.8.8 > NUL 2>&1" % (
+        self.numPings, (self.pingTimeout * 1000), self.maxWaitTime))
         success = 0
         if response == 0:
             success = 1
-        return { 'date': datetime.now(), 'success': success }
+        return {'date': datetime.now(), 'success': success}
 
     def logPingResults(self, pingResults):
-        self.logger.log([ pingResults['date'].strftime('%Y-%m-%d %H:%M:%S'), str(pingResults['success'])])
+        self.logger.log([pingResults['date'].strftime('%Y-%m-%d %H:%M:%S'), str(pingResults['success'])])
+
+
 
 class SpeedTest(threading.Thread):
     def __init__(self):
         super(SpeedTest, self).__init__()
         self.config = json.load(open('./config.json'))
-        self.logger = Logger(self.config['log']['type'], { 'filename': self.config['log']['files']['speed'] })
+        self.logger = Logger(self.config['log']['type'], {'filename': self.config['log']['files']['speed']})
 
     def run(self):
         speedTestResults = self.doSpeedTest()
         self.logSpeedTestResults(speedTestResults)
-        self.tweetResults(speedTestResults)
+        #self.tweetResults(speedTestResults)
 
     def doSpeedTest(self):
         # run a speed test
-        result = os.popen("/usr/local/bin/speedtest-cli --simple").read()
+        result = os.popen("speedtest-cli --simple").read()
         if 'Cannot' in result:
-            return { 'date': datetime.now(), 'uploadResult': 0, 'downloadResult': 0, 'ping': 0 }
+            return {'date': datetime.now(), 'uploadResult': 0, 'downloadResult': 0, 'ping': 0}
 
         # Result:
         # Ping: 529.084 ms
         # Download: 0.52 Mbit/s
         # Upload: 1.79 Mbit/s
-
         resultSet = result.split('\n')
         pingResult = resultSet[0]
         downloadResult = resultSet[1]
@@ -120,11 +124,12 @@ class SpeedTest(threading.Thread):
         downloadResult = float(downloadResult.replace('Download: ', '').replace(' Mbit/s', ''))
         uploadResult = float(uploadResult.replace('Upload: ', '').replace(' Mbit/s', ''))
 
-        return { 'date': datetime.now(), 'uploadResult': uploadResult, 'downloadResult': downloadResult, 'ping': pingResult }
+        return {'date': datetime.now(), 'uploadResult': uploadResult, 'downloadResult': downloadResult,
+                'ping': pingResult}
 
     def logSpeedTestResults(self, speedTestResults):
-        self.logger.log([ speedTestResults['date'].strftime('%Y-%m-%d %H:%M:%S'), str(speedTestResults['uploadResult']), str(speedTestResults['downloadResult']), str(speedTestResults['ping']) ])
-
+        self.logger.log([speedTestResults['date'].strftime('%Y-%m-%d %H:%M:%S'), str(speedTestResults['downloadResult']),
+                         str(speedTestResults['uploadResult']), str(speedTestResults['ping'])])
 
     def tweetResults(self, speedTestResults):
         thresholdMessages = self.config['tweetThresholds']
@@ -132,19 +137,23 @@ class SpeedTest(threading.Thread):
         for (threshold, messages) in thresholdMessages.items():
             threshold = float(threshold)
             if speedTestResults['downloadResult'] < threshold:
-                message = messages[random.randint(0, len(messages) - 1)].replace('{tweetTo}', self.config['tweetTo']).replace('{internetSpeed}', self.config['internetSpeed']).replace('{downloadResult}', str(speedTestResults['downloadResult']))
+                message = messages[random.randint(0, len(messages) - 1)].replace('{tweetTo}',
+                                                                                 self.config['tweetTo']).replace(
+                    '{internetSpeed}', self.config['internetSpeed']).replace('{downloadResult}',
+                                                                             str(speedTestResults['downloadResult']))
 
         if message:
             api = twitter.Api(consumer_key=self.config['twitter']['twitterConsumerKey'],
-                            consumer_secret=self.config['twitter']['twitterConsumerSecret'],
-                            access_token_key=self.config['twitter']['twitterToken'],
-                            access_token_secret=self.config['twitter']['twitterTokenSecret'])
+                              consumer_secret=self.config['twitter']['twitterConsumerSecret'],
+                              access_token_key=self.config['twitter']['twitterToken'],
+                              access_token_secret=self.config['twitter']['twitterTokenSecret'])
             if api:
                 status = api.PostUpdate(message)
 
+
 class DaemonApp():
-    def __init__(self, pidFilePath, stdout_path='/dev/null', stderr_path='/dev/null'):
-        self.stdin_path = '/dev/null'
+    def __init__(self, pidFilePath, stdout_path='NUL', stderr_path='NUL'):
+        self.stdin_path = 'NUL' #/dev/null for UNIX systems
         self.stdout_path = stdout_path
         self.stderr_path = stderr_path
         self.pidfile_path = pidFilePath
@@ -153,20 +162,19 @@ class DaemonApp():
     def run(self):
         main(__file__, sys.argv[1:])
 
+
 if __name__ == '__main__':
     main(__file__, sys.argv[1:])
 
     workingDirectory = os.path.basename(os.path.realpath(__file__))
-    stdout_path = '/dev/null'
-    stderr_path = '/dev/null'
+    stdout_path = 'NUL'
+    stderr_path = 'NUL'
     fileName, fileExt = os.path.split(os.path.realpath(__file__))
     pidFilePath = os.path.join(workingDirectory, os.path.basename(fileName) + '.pid')
     from daemon import runner
+
     dRunner = runner.DaemonRunner(DaemonApp(pidFilePath, stdout_path, stderr_path))
     dRunner.daemon_context.working_directory = workingDirectory
     dRunner.daemon_context.umask = 0o002
-    dRunner.daemon_context.signal_map = { signal.SIGTERM: 'terminate', signal.SIGUP: 'terminate' }
+    dRunner.daemon_context.signal_map = {signal.SIGTERM: 'terminate', signal.SIGHUP: 'terminate'}
     dRunner.do_action()
-
-
-
