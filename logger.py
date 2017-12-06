@@ -7,6 +7,9 @@ class Logger(object):
     def log(self, logItems):
         self.logger.log(logItems)
 
+    def datelog(self, logItem):
+        self.logger.datelog(logItem)
+
 class CsvLogger(object):
     def __init__(self, filename):
         self.filename = filename
@@ -14,3 +17,7 @@ class CsvLogger(object):
     def log(self, logItems):
         with open(self.filename, "a") as logfile:
             logfile.write("%s\n" % ','.join(logItems))
+
+    def datelog(self, logItem):
+        with open(self.filename, "a") as logfile:
+            logfile.write("\n" + logItem + "\n")

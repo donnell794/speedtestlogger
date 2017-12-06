@@ -43,6 +43,7 @@ class Monitor():
         self.lastSpeedTest = None
         self.config = json.load(open('./config.json'))
         self.logger = Logger(self.config['log']['type'], {'filename': self.config['log']['files']['speed']})
+        #self.datelogger = Logger(self.config['log']['type'], {'filename': self.config['log']['files']['speed']})
 
     def run(self):
         """
@@ -66,7 +67,7 @@ class Monitor():
         speedThread.start()
 
     def logDate(self):
-        self.logger.log(datetime.now().strftime('%B %d, %Y'),)
+        self.logger.datelog(datetime.now().strftime('%B %d, %Y'))
 
 class PingTest(threading.Thread):
     def __init__(self, numPings=3, pingTimeout=2, maxWaitTime=6):
