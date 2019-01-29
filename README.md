@@ -16,10 +16,10 @@ CSV Logging config example:
 ```
 
 ## Usage
-> python speedcomplainer.py
+> python speedtestlogger.py
 
 Or to run in the background:
 
-> python speedcomplainer.py > /dev/null &
+> python speedtestlogger.py > /dev/null &
 
 
